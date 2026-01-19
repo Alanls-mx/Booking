@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum Role {
+  ADMIN   // Dono do sistema/tenant
+  STAFF   // Funcionário
+  CLIENT  // Cliente final
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  COMPLETED
+}
+
+// Models
+
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique // Para identificar o tenant na URL ou subdomain
+  logo        String?
+  primaryColor String? @default("#000000")
+  secondaryColor String? @default("#ffffff")
+  
+  // Footer / Contact Info
+  facebookUrl   String?
+  instagramUrl  String?
+  whatsapp      String?
+  address       String?
+  contactEmail  String?
+  contactPhone  String?
+
+  // Páginas Legais e Institucionais
+  termsOfUse    String?  @db.Text
+  privacyPolicy String?  @db.Text
+  aboutUs       String?  @db.Text
+
+  // Configurações do negócio (JSON)
+  // Ex: { "hasProfessionals": true, "businessType": "BARBERSHOP" }
+  config      Json?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users         User[]
+  services      Service[]
+  plans         Plan[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  professionals Professional[]
+  appointments  Appointment[]
+  workingHours  WorkingHours[]
+  reviews       Review[]
+  locations     Location[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  price       Decimal  @db.Decimal(10, 2)
+  interval    String   // MONTHLY, YEARLY
+  credits     Int      // Number of cuts/services allowed per interval
+  active      Boolean  @default(true)
+  
+  // Relation to services
+  services    Service[]
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  subscriptions Subscription[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+model Subscription {
+  id        String   @id @default(uuid())
+  status    String   // ACTIVE, CANCELED, EXPIRED
+  
+  startDate DateTime @default(now())
+  endDate   DateTime // calculated based on plan interval
+  
+  creditsRemaining Int
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id])
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  payments  Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tenantId])
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  amount        Decimal  @db.Decimal(10, 2)
+  method        String   // CREDIT_CARD, PIX, CASH, PLAN_CREDIT
+  status        String   // PENDING, COMPLETED, FAILED
+  type          String   // APPOINTMENT, SUBSCRIPTION
+  
+  gatewayRef    String?  // ID from Stripe/MercadoPago
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  
+  // Optional links
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+  
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model Location {
+  id        String   @id @default(uuid())
+  name      String
+  address   String?
+  phone     String?
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  
+  appointments Appointment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([tenantId])
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String
+  password  String
+  name      String
+  role      Role     @default(CLIENT)
+  avatarUrl String?
+  
+  // New fields
+  cpf       String?
+  phone     String?
+  address   String?
+  
+  // Integrations
+  manyChatSubscriberId String? // ID do assinante no ManyChat
+
+  // Permissions (JSON array of strings, e.g. ["dashboard", "team"])
+  permissions Json?
+
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  appointments Appointment[] // Agendamentos feitos por este usuário (cliente)
+  reviews      Review[]      // Avaliações feitas por este usuário
+  subscriptions Subscription[]
+  payments      Payment[]
+  passwordResetTokens PasswordResetToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, tenantId]) // Email único por tenant
+  @@index([tenantId])
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  duration    Int      // em minutos
+  price       Decimal  @db.Decimal(10, 2)
+  imageUrl    String?
+  
+  // Plans that include this service
+  plans       Plan[]
+
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  appointments Appointment[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+model Professional {
+  id        String   @id @default(uuid())
+  name      String
+  bio       String?
+  email     String?  // Opcional, caso queira vincular a um User depois
+  avatarUrl String?
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  appointments Appointment[]
+  workingHours WorkingHours[]
+  reviews      Review[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+model WorkingHours {
+  id             String        @id @default(uuid())
+  dayOfWeek      Int           // 0=Domingo, 1=Segunda, ...
+  startTime      String        // "09:00"
+  endTime        String        // "18:00"
+  
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id])
+  
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Appointment {
+  id        String            @id @default(uuid())
+  date      DateTime          // Data e hora do agendamento
+  status    AppointmentStatus @default(PENDING)
+  notes     String?
+  paymentMethod String?
+
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  services  Service[]
+
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+
+  payments       Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([date])
+  @@index([locationId])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  rating    Int      // 1 a 5
+  comment   String?
+  isFeatured Boolean  @default(false)
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([professionalId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tenantId])
+}
